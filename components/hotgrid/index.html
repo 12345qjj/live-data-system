@@ -9,7 +9,6 @@
   #grid{width:100%;min-height:110px;margin:0;padding:0}
   .htCore{margin:0!important}
   .hl{background:#FFF176 !important;color:#111 !important;font-weight:700}
-  /* Handsontable 适配：表头深紫底白字，单元格白底黑字 */
   .handsontable{color:#1A1B3E;font-size:0.74rem}
   .handsontable td{background:#fff;color:#1A1B3E;border-color:rgba(0,0,0,0.10);font-weight:600}
   .handsontable th{background:linear-gradient(135deg,#7C7BFF,#A29BFE);color:#fff;font-weight:700;border-color:rgba(0,0,0,0.18)}
@@ -19,12 +18,10 @@
   .ht_clone_top th,.ht_clone_left th{background:linear-gradient(135deg,#7C7BFF,#A29BFE)!important;color:#fff!important}
   .handsontable .changeInput{background:#fff;color:#1A1B3E}
   .handsontable.listbox td,.handsontable.listbox th{background:#23244a;color:#eee}
-  /* 修复白色小图标：表头排序箭头、筛选下拉三角、列头隐藏/显示图标等 */
   .handsontable th .colHeader{color:#fff!important}
   .handsontable .columnSorting,.handsontable .columnSorting:hover{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='%23fff' d='M6 0l4 5H2zM6 12l4-5H2z'/%3E%3C/svg%3E")!important}
   .handsontable .columnSorting.ascending{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='%23fff' d='M6 0l4 5H2z'/%3E%3C/svg%3E")!important}
   .handsontable .columnSorting.descending{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='%23fff' d='M6 12l4-5H2z'/%3E%3C/svg%3E")!important}
-  /* 右键菜单超紧凑样式 */
   .htContextMenu table.htCore{color:#1A1B3E!important}
   .htContextMenu table.htCore td{
     background:#fff!important;color:#1A1B3E!important;font-weight:500;
@@ -41,10 +38,8 @@
     box-shadow:0 4px 16px rgba(0,0,0,0.15);
     border-collapse:collapse!important;
   }
-  /* 滚动条 */
   .htContextMenu::-webkit-scrollbar{width:8px;background:#f0f0f5}
   .htContextMenu::-webkit-scrollbar-thumb{background:#7C7BFF;border-radius:4px}
-  /* 编辑输入框遮罩 */
   .handsontableInput,.handsontableInput:focus{background:#fff!important;color:#1A1B3E!important;border:2px solid #7C7BFF!important}
 </style>
 </head>
@@ -108,7 +103,6 @@ function buildData(args){
   const rowCount = (args.data || []).length;
   const dynamicHeight = Math.min(Math.max(rowCount, 1) * 28 + 50, 900);
 
-// 右键菜单自适应：内滚 + 视口溢出上移
 function fixContextMenu(){
   var m = document.querySelector('.htContextMenu');
   if(!m) return;
@@ -137,45 +131,46 @@ setInterval(fixContextMenu, 50);
     stretchH: 'all',
     manualColumnResize: true,
     manualRowResize: true,
-    contextMenu: [
-      {key:'row_above', name:'上方插入行'},
-      {key:'row_below', name:'下方插入行'},
-      {key:'remove_row', name:'删除行'},
-      {
-        key:'merge_cells', name:'合并',
-        callback: function(){
-          var p = hot.getPlugin('mergeCells');
-          if(p){ p.mergeSelection(); hot.render(); }
-        }
-      },
-      {
-        key:'unmerge_cells', name:'取消合并',
-        callback: function(){
-          var p = hot.getPlugin('mergeCells');
-          if(p){ p.unmergeSelection(); hot.render(); }
-        }
-      },
-      {key:'highlight', name:'🟡 标黄', callback: function(){ toggleHL(true); }},
-      {key:'unhighlight', name:'⬜ 去黄', callback: function(){ toggleHL(false); }},
-      {key:'undo', name:'撤销'},
-      {key:'save', name:'💾 保存', callback: function(){ pushValue('writeback'); }}
-    ],
+    contextMenu: {
+      items: {
+        "row_above": {name: '上方插入行', callback: function(key, opt){
+          opt.instance.alter('insert_row_above', opt.coords.row, 1);
+          setTimeout(function(){ pushValue('edit'); }, 100);
+        }},
+        "row_below": {name: '下方插入行', callback: function(key, opt){
+          opt.instance.alter('insert_row_below', opt.coords.row, 1);
+          setTimeout(function(){ pushValue('edit'); }, 100);
+        }},
+        "remove_row": {name: '删除行', callback: function(key, opt){
+          var sel = hot.getSelected();
+          if(!sel || sel.length===0) return;
+          for(var s=sel.length-1; s>=0; s--){
+            hot.alter('remove_row', sel[s][0], sel[s][2] - sel[s][0] + 1);
+          }
+          setTimeout(function(){ pushValue('edit'); }, 100);
+        }},
+        "merge_cells": {name: '合并'},
+        "unmerge_cells": {name: '取消合并'},
+        "highlight": {name: '🟡 标黄', callback: function(){ toggleHL(true); }},
+        "unhighlight": {name: '⬜ 去黄', callback: function(){ toggleHL(false); }},
+        "undo": {name: '撤销', callback: function(){
+          var undo = hot.getPlugin('undoRedo');
+          if(undo && undo.done && undo.done.length>0){
+            undo.undo();
+            setTimeout(function(){ pushValue('edit'); }, 150);
+          }
+        }},
+        "save": {name: '💾 保存', callback: function(){ pushValue('writeback'); }}
+      }
+    },
     mergeCells: merges,
     cell: cellConf,
     autoWrapRow: true,
     autoWrapCol: true,
     afterChange: function(changes, source){
-      if(!changes || source === 'loadData') return;
+      if(!changes) return;
+      if(source === 'loadData') return;
       pushValue('edit');
-    },
-    afterRemoveRow: function(index, amount, source){
-      if(source) pushValue('edit');
-    },
-    afterCreateRow: function(index, amount, source){
-      if(source) pushValue('edit');
-    },
-    afterUndo: function(action){
-      if(action) pushValue('edit');
     },
     licenseKey: 'non-commercial-and-evaluation',
     className: 'htCenter htMiddle'
@@ -266,8 +261,7 @@ setTimeout(function(){
   }
   try { Streamlit.setFrameHeight(document.body.scrollHeight || 480); } catch(e){}
 }, 800);
-} // end initHotgrid
-
+}
 if (window.Streamlit) {
   initHotgrid();
 } else {

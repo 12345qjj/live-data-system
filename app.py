@@ -96,6 +96,7 @@ def auto_save():
     st.session_state._last_autosave_time = now
     try:
         snap = {
+            '_session_id': st.session_state.get('_session_id', ''),
             'session': st.session_state.current_session,
             'data_rows': [dict(r) for r in st.session_state.data_rows],
             'current_round': st.session_state.current_round,
@@ -120,9 +121,9 @@ def auto_save():
         pass
 
 def auto_load():
-    """启动时恢复数据：先云端，再本地"""
-    if st.session_state.get('_session_ended'):
-        return False
+    """启动时恢复数据：仅同一 session_id 才恢复（退出后不恢复）"""
+    sid = st.session_state.get('_session_id', '')
+    if not sid: return False
     snap = db_load("autosave") if HAS_DB else None
     if not snap:
         path = auto_save_path()
@@ -133,6 +134,8 @@ def auto_load():
         except Exception:
             return False
     if not snap: return False
+    # 检查 session_id 匹配
+    if snap.get('_session_id') != sid: return False
     try:
         st.session_state.current_session = snap.get('session', st.session_state.current_session)
         st.session_state.data_rows = snap.get('data_rows', [])
@@ -203,6 +206,7 @@ if HAS_DB:
                 st.session_state.pwd_hash = pw
                 st.session_state.team = tc.strip()
                 st.session_state.share = st.session_state.login_share
+                st.session_state._session_id = un + '_' + datetime.now().strftime('%Y%m%d%H%M%S')  # 每次登录生成新 ID
                 # 团队码共享：把他人同团队码的数据合并过来
                 if st.session_state.share and st.session_state.team:
                     _merge_team_data()
@@ -945,7 +949,7 @@ st.markdown("""
 
 # 用户信息 + 共享开关（仅DB模式）
 if HAS_DB:
-    uc1, uc2, uc3 = st.columns([2, 1, 1])
+    uc1, uc2, uc3, uc4 = st.columns([1.5, 1, 1, 0.7])
     with uc1:
         st.markdown(f'<span style="color:rgba(255,255,255,0.5);font-size:0.7rem">👤 {st.session_state.user}</span>', unsafe_allow_html=True)
     with uc2:
@@ -956,9 +960,20 @@ if HAS_DB:
         new_share = st.checkbox('📤 共享我的数据', value=was_share, key='ui_share')
         if new_share != was_share:
             st.session_state.share = new_share
-            # 重新保存当前数据以反映共享状态
-            if st.session_state.data_rows:
-                auto_save()
+            if st.session_state.data_rows: auto_save()
+            st.rerun()
+    with uc4:
+        if st.button('退出', key='logout_btn', use_container_width=True, type='secondary'):
+            # 清除 autosave → 下次登录不恢复
+            if HAS_DB:
+                try: db.table("data_store").delete().eq("id", f"{st.session_state.user}_autosave").execute()
+                except: pass
+            for k in ['user','pwd_hash','team','share','_session_id','data_rows','current_session',
+                      'current_round','current_phase','first_round','first_dry_start','first_dry_duration',
+                      'last_end_time','last_cumulative','session_round_totals','prev_round_totals',
+                      'round_label_override','history','finished_sessions','phase_data','edit_data',
+                      'phase_start_time','phase_end_time']:
+                if k in st.session_state: del st.session_state[k]
             st.rerun()
 
 # Row 1: 轮次(含场次) | 环节 | 主播 | 添加主播
