@@ -5,3 +5,4 @@ Pillow>=10.0
 numpy>=1.24
 plotly>=5.17
 kaleido>=0.2.1
+supabase>=2.0
