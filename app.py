@@ -30,21 +30,27 @@ from io import BytesIO
 import streamlit.components.v1 as components
 
 # Supabase：优先 Streamlit secrets，再回退到 env vars，最后回退到 hardcode
+# Supabase：保证 HAS_DB 始终为 True（除非 create_client 失败）
+SUPABASE_URL = "https://zetaijjtdabbwqoomtpm.supabase.co"
+SUPABASE_KEY = "sb_publishable_gfEkoBv9YA2yPJGbr-tkQg_gVfmEyPr"
+db = None
+HAS_DB = False
 try:
-    import os
     _sec = {}
     try:
-        _sec = st.secrets
+        _sec = dict(st.secrets)
     except Exception:
         pass
-    SUPABASE_URL = _sec.get("SUPABASE_URL", os.environ.get('SUPABASE_URL', "https://zetaijjtdabbwqoomtpm.supabase.co"))
-    SUPABASE_KEY = _sec.get("SUPABASE_KEY", os.environ.get('SUPABASE_KEY', "sb_publishable_gfEkoBv9YA2yPJGbr-tkQg_gVfmEyPr"))
-    db = create_client(SUPABASE_URL, SUPABASE_KEY)
-    HAS_DB = bool(SUPABASE_URL and SUPABASE_KEY)
+    if _sec.get("SUPABASE_URL"): SUPABASE_URL = _sec["SUPABASE_URL"]
+    if _sec.get("SUPABASE_KEY"): SUPABASE_KEY = _sec["SUPABASE_KEY"]
+    import os as _os
+    if _os.environ.get("SUPABASE_URL"): SUPABASE_URL = _os.environ["SUPABASE_URL"]
+    if _os.environ.get("SUPABASE_KEY"): SUPABASE_KEY = _os.environ["SUPABASE_KEY"]
+    from supabase import create_client as _cc
+    db = _cc(SUPABASE_URL, SUPABASE_KEY)
+    HAS_DB = True
 except Exception as e:
     print(f'DB init err: {e}')
-    HAS_DB = False
-    db = None
 
 # ============================================================
 HAS_OCR = False  # OCR 已禁用
