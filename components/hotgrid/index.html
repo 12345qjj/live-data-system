@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="handsontable.full.min.css">
+<style>
+  html,body{margin:0;padding:0;background:transparent;font-family:-apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif}
+  #wrap{display:flex;flex-direction:column;gap:0;width:100%;min-height:120px;margin:0;padding:0}
+  #grid{width:100%;min-height:110px;margin:0;padding:0}
+  .htCore{margin:0!important}
+  .hl{background:#FFF176 !important;color:#111 !important;font-weight:700}
+  /* Handsontable 适配：表头深紫底白字，单元格白底黑字 */
+  .handsontable{color:#1A1B3E;font-size:0.74rem}
+  .handsontable td{background:#fff;color:#1A1B3E;border-color:rgba(0,0,0,0.10);font-weight:600}
+  .handsontable th{background:linear-gradient(135deg,#7C7BFF,#A29BFE);color:#fff;font-weight:700;border-color:rgba(0,0,0,0.18)}
+  .handsontable td.area,.handsontable td.area-1,.handsontable td.area-2,.handsontable td.area-3{background:rgba(124,123,255,0.10);color:#1A1B3E}
+  .handsontable td.current{background:rgba(124,123,255,0.30)!important;color:#1A1B3E!important}
+  .handsontable .wtBorder{background:#7C7BFF}
+  .ht_clone_top th,.ht_clone_left th{background:linear-gradient(135deg,#7C7BFF,#A29BFE)!important;color:#fff!important}
+  .handsontable .changeInput{background:#fff;color:#1A1B3E}
+  .handsontable.listbox td,.handsontable.listbox th{background:#23244a;color:#eee}
+  /* 修复白色小图标：表头排序箭头、筛选下拉三角、列头隐藏/显示图标等 */
+  .handsontable th .colHeader{color:#fff!important}
+  .handsontable .columnSorting,.handsontable .columnSorting:hover{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='%23fff' d='M6 0l4 5H2zM6 12l4-5H2z'/%3E%3C/svg%3E")!important}
+  .handsontable .columnSorting.ascending{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='%23fff' d='M6 0l4 5H2z'/%3E%3C/svg%3E")!important}
+  .handsontable .columnSorting.descending{background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 12 12'%3E%3Cpath fill='%23fff' d='M6 12l4-5H2z'/%3E%3C/svg%3E")!important}
+  /* 右键菜单超紧凑样式 */
+  .htContextMenu table.htCore{color:#1A1B3E!important}
+  .htContextMenu table.htCore td{
+    background:#fff!important;color:#1A1B3E!important;font-weight:500;
+    padding:1px 10px!important;font-size:0.68rem!important;line-height:1.15!important;
+    height:auto!important;
+  }
+  .htContextMenu table.htCore td:hover{background:rgba(124,123,255,0.15)!important}
+  .htContextMenu table.htCore td.disabled{color:#aaa!important}
+  .htContextMenu .htItemWrapper{color:#1A1B3E!important}
+  .htContextMenu table.htCore{
+    background:#fff!important;
+    border:1px solid rgba(0,0,0,0.15);
+    border-radius:6px;
+    box-shadow:0 4px 16px rgba(0,0,0,0.15);
+    border-collapse:collapse!important;
+  }
+  /* 滚动条 */
+  .htContextMenu::-webkit-scrollbar{width:8px;background:#f0f0f5}
+  .htContextMenu::-webkit-scrollbar-thumb{background:#7C7BFF;border-radius:4px}
+  /* 编辑输入框遮罩 */
+  .handsontableInput,.handsontableInput:focus{background:#fff!important;color:#1A1B3E!important;border:2px solid #7C7BFF!important}
+</style>
+</head>
+<body>
+<div id="wrap">
+  <div id="grid"></div>
+</div>
+
+<script src="handsontable.full.min.js"></script>
+<script src="streamlit-bridge.js"></script>
+<script>
+function initHotgrid(){
+const Streamlit = window.Streamlit;
+if(!Streamlit){ console.error("Streamlit bridge not loaded"); return; }
+let hot = null;
+let lastSig = null;
+
+function getCols(args){
+  return (args.columns||[]).map(function(name){
+    return {
+      data: name,
+      title: name,
+      readOnly: (args.read_only_cols||[]).indexOf(name) >= 0,
+      width: 84
+    };
+  });
+}
+
+function computeAutoMerges(args){
+  const data = args.data || [];
+  const splitCols = args.split_cols || [];
+  const allCols = args.columns || [];
+  const merges = [];
+  let i = 0;
+  while(i < data.length){
+    const key = (data[i]['场次']||'') + '|' + (data[i]['轮次']||'');
+    let j = i + 1;
+    while(j < data.length && ((data[j]['场次']||'') + '|' + (data[j]['轮次']||'')) === key) j++;
+    const span = j - i;
+    if(span > 1){
+      for(let c = 0; c < allCols.length; c++){
+        const name = allCols[c];
+        if(splitCols.indexOf(name) < 0){
+          merges.push({row:i, col:c, rowspan:span, colspan:1});
+        }
+      }
+    }
+    i = j;
+  }
+  return merges;
+}
+
+function buildData(args){
+  const container = document.getElementById('grid');
+  if(hot){ hot.destroy(); hot = null; }
+  const cols = getCols(args);
+  const merges = computeAutoMerges(args);
+  const cellConf = (args.hl || []).map(function(p){
+    return { row: p[0], col: p[1], className: 'hl' };
+  });
+  const rowCount = (args.data || []).length;
+  const dynamicHeight = Math.min(Math.max(rowCount, 1) * 28 + 50, 900);
+
+// 右键菜单自适应：内滚 + 视口溢出上移
+function fixContextMenu(){
+  var m = document.querySelector('.htContextMenu');
+  if(!m) return;
+  var rect = m.getBoundingClientRect();
+  if(rect.width === 0 || rect.height === 0) return;
+  m.style.setProperty('max-height', '420px', 'important');
+  m.style.setProperty('overflow-y', 'auto', 'important');
+  m.style.background = '#fff';
+  var vh = window.innerHeight;
+  var newTop = parseFloat(m.style.top);
+  if(isNaN(newTop)) newTop = rect.top;
+  if(rect.bottom > vh - 8){
+    var overflow = rect.bottom - (vh - 8);
+    m.style.setProperty('top', Math.max(8, newTop - overflow) + 'px', 'important');
+  }
+  if(rect.top < 8){ m.style.setProperty('top', '8px', 'important'); }
+}
+setInterval(fixContextMenu, 50);
+
+  hot = new Handsontable(container, {
+    data: JSON.parse(JSON.stringify(args.data || [])),
+    columns: cols,
+    rowHeaders: true,
+    colHeaders: true,
+    height: dynamicHeight,
+    stretchH: 'all',
+    manualColumnResize: true,
+    manualRowResize: true,
+    contextMenu: [
+      {key:'row_above', name:'上方插入行'},
+      {key:'row_below', name:'下方插入行'},
+      {key:'remove_row', name:'删除行'},
+      {
+        key:'merge_cells', name:'合并',
+        callback: function(){
+          var p = hot.getPlugin('mergeCells');
+          if(p){ p.mergeSelection(); hot.render(); }
+        }
+      },
+      {
+        key:'unmerge_cells', name:'取消合并',
+        callback: function(){
+          var p = hot.getPlugin('mergeCells');
+          if(p){ p.unmergeSelection(); hot.render(); }
+        }
+      },
+      {key:'highlight', name:'🟡 标黄', callback: function(){ toggleHL(true); }},
+      {key:'unhighlight', name:'⬜ 去黄', callback: function(){ toggleHL(false); }},
+      {key:'undo', name:'撤销'},
+      {key:'save', name:'💾 保存', callback: function(){ pushValue('writeback'); }}
+    ],
+    mergeCells: merges,
+    cell: cellConf,
+    autoWrapRow: true,
+    autoWrapCol: true,
+    afterChange: function(changes, source){
+      if(!changes || source === 'loadData') return;
+      pushValue('edit');
+    },
+    licenseKey: 'non-commercial-and-evaluation',
+    className: 'htCenter htMiddle'
+  });
+}
+
+function getHighlights(){
+  const hs = [];
+  if(!hot) return hs;
+  const n = hot.countRows(), m = hot.countCols();
+  for(let r=0;r<n;r++) for(let c=0;c<m;c++){
+    const meta = hot.getCellMeta(r,c);
+    if(meta.className && meta.className.indexOf('hl')>=0) hs.push([r,c]);
+  }
+  return hs;
+}
+
+function getFullData(){
+  if(!hot) return [];
+  const n = hot.countRows(), m = hot.countCols();
+  const headers = hot.getColHeader();
+  const merges = (hot.getSettings().mergeCells) || [];
+  const topLeft = {};
+  function k(r,c){ return r + ',' + c; }
+  merges.forEach(function(mg){
+    const rs = mg.rowspan || 1, cs = mg.colspan || 1;
+    for(let dr=0; dr<rs; dr++) for(let dc=0; dc<cs; dc++){
+      const r = mg.row + dr, c = mg.col + dc;
+      if(!(dr===0 && dc===0)) topLeft[k(r,c)] = [mg.row, mg.col];
+    }
+  });
+  const rows = [];
+  for(let r=0; r<n; r++){
+    const obj = {};
+    for(let c=0; c<m; c++){
+      const tl = topLeft[k(r,c)];
+      const v = tl ? hot.getDataAtCell(tl[0], tl[1]) : hot.getDataAtCell(r, c);
+      obj[headers[c]] = (v === null || v === undefined) ? '' : v;
+    }
+    rows.push(obj);
+  }
+  return rows;
+}
+
+function pushValue(action){
+  if(!hot) return;
+  const data = getFullData();
+  Streamlit.setComponentValue({data: data, action: action, hl: getHighlights()});
+}
+
+function toggleHL(on){
+  if(!hot) return;
+  const sel = hot.getSelected();
+  if(!sel) return;
+  sel.forEach(function(range){
+    const r1=range[0], c1=range[1], r2=range[2], c2=range[3];
+    for(let r=r1;r<=r2;r++) for(let c=c1;c<=c2;c++){
+      const meta = hot.getCellMeta(r,c);
+      let cls = (meta.className||'').replace(/hl/g,'').trim();
+      if(on) cls = (cls + ' hl').trim();
+      meta.className = cls;
+      hot.setCellMeta(r,c,'className',cls);
+    }
+  });
+  hot.render();
+}
+
+Streamlit.events.addEventListener(Streamlit.RENDER_EVENT, function(event){
+  const args = (event.detail && event.detail.args) || {};
+  const sig = JSON.stringify(args.data) + '|' + JSON.stringify(args.columns) + '|' +
+              JSON.stringify(args.read_only_cols) + '|' + JSON.stringify(args.split_cols);
+  if(sig !== lastSig){
+    lastSig = sig;
+    buildData(args);
+  }
+  try { Streamlit.setFrameHeight(document.body.scrollHeight || 480); } catch(e){}
+});
+
+Streamlit.setComponentReady();
+
+setTimeout(function(){
+  if(!hot){
+    try {
+      const w = window;
+      const args = w.__streamlitArgs__ || {};
+      if(args && args.data) buildData(args);
+    } catch(e){}
+  }
+  try { Streamlit.setFrameHeight(document.body.scrollHeight || 480); } catch(e){}
+}, 800);
+} // end initHotgrid
+
+if (window.Streamlit) {
+  initHotgrid();
+} else {
+  window.addEventListener("streamlit-bridge-ready", initHotgrid, { once: true });
+}
+</script>
+</body>
+</html>

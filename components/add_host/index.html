@@ -1,0 +1,92 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<style>
+  html,body{margin:0;padding:0;background:transparent;font-family:-apple-system,"Segoe UI",Roboto,"Microsoft YaHei",sans-serif}
+  .add-host-box{
+    display:flex;
+    align-items:stretch;
+    background:#fff;
+    border:1px solid rgba(0,0,0,0.25);
+    border-radius:8px;
+    height:38px;
+    overflow:hidden;
+    width:100%;
+    box-sizing:border-box;
+  }
+  .add-host-box input{
+    flex:1;
+    border:none;
+    outline:none;
+    padding:0 12px;
+    font-size:0.9rem;
+    color:#111;
+    background:transparent;
+    height:100%;
+    box-sizing:border-box;
+  }
+  .add-host-box input::placeholder{color:rgba(0,0,0,0.45)}
+  .add-host-btn{
+    background:transparent;
+    color:#ff4757;
+    font-weight:700;
+    font-size:0.95rem;
+    padding:0 18px;
+    cursor:pointer;
+    border:none;
+    border-left:1px solid rgba(0,0,0,0.08);
+    height:100%;
+    white-space:nowrap;
+    transition:background 0.15s;
+  }
+  .add-host-btn:hover{background:rgba(255,71,87,0.08)}
+  .add-host-btn:active{background:rgba(255,71,87,0.15)}
+</style>
+</head>
+<body>
+<div class="add-host-box">
+  <input type="text" id="host-input" placeholder="输入新主播名" autocomplete="off">
+  <button class="add-host-btn" id="host-btn">添加</button>
+</div>
+<script>
+(function(){
+  var RENDER_EVENT = "streamlit:render";
+  var ready = false;
+  var input = document.getElementById('host-input');
+  var btn = document.getElementById('host-btn');
+  function send(msg){
+    window.parent.postMessage(Object.assign({isStreamlitMessage:true}, msg), "*");
+  }
+  function submit(){
+    var val = (input.value || "").trim();
+    if(!val) { input.focus(); return; }
+    send({type:"streamlit:setComponentValue", value:{name: val}, dataType:"json"});
+    input.value = "";
+    input.focus();
+  }
+  btn.addEventListener("click", submit);
+  input.addEventListener("keydown", function(e){
+    if(e.key === "Enter") submit();
+  });
+  // bridge init
+  var Streamlit = window.Streamlit = window.Streamlit || {
+    API_VERSION:1, RENDER_EVENT:RENDER_EVENT, events:new EventTarget(),
+    setComponentReady:function(){
+      send({type:"streamlit:componentReady", apiVersion:1});
+      ready = true;
+    },
+    setComponentValue:function(v){ send({type:"streamlit:setComponentValue", value:v, dataType:"json"}); },
+    setFrameHeight:function(h){ send({type:"streamlit:setFrameHeight", height:h||document.body.scrollHeight}); }
+  };
+  window.addEventListener("message", function(e){
+    var d = e.data;
+    if(!d || d.type !== RENDER_EVENT) return;
+    Streamlit.events.dispatchEvent(new CustomEvent(RENDER_EVENT, {detail:d}));
+  });
+  Streamlit.setComponentReady();
+  Streamlit.setFrameHeight();
+})();
+</script>
+</body>
+</html>
