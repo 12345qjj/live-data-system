@@ -168,6 +168,15 @@ setInterval(fixContextMenu, 50);
       if(!changes || source === 'loadData') return;
       pushValue('edit');
     },
+    afterRemoveRow: function(index, amount, source){
+      if(source) pushValue('edit');
+    },
+    afterCreateRow: function(index, amount, source){
+      if(source) pushValue('edit');
+    },
+    afterUndo: function(action){
+      if(action) pushValue('edit');
+    },
     licenseKey: 'non-commercial-and-evaluation',
     className: 'htCenter htMiddle'
   });

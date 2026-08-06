@@ -181,33 +181,31 @@ def plotly_download_button(fig, fname):
 st.set_page_config(page_title="🎯 直播记录系统", page_icon="🎯", layout="wide", initial_sidebar_state="collapsed")
 
 # ============================================================
-# 登录页（仅当启用 DB 时）
+# 登录页（5 行居中）
 # ============================================================
 if HAS_DB:
     if 'user' not in st.session_state:
-        st.markdown('<div style="text-align:center;padding:40px 0"><h2>🎯 直播记录系统</h2></div>', unsafe_allow_html=True)
-        _, c1, c2, _ = st.columns([1, 2, 2, 1])
+        st.markdown('<div style="text-align:center;padding:30px 0"><h2>🎯 直播记录系统</h2></div>', unsafe_allow_html=True)
+        _, c1, _ = st.columns([1, 2, 1])
         with c1:
-            st.markdown('<div style="text-align:right;padding-top:8px;color:rgba(255,255,255,0.6)">用户名：</div>', unsafe_allow_html=True)
-        with c2:
-            un = st.text_input('用户名', key='login_un', label_visibility='collapsed', placeholder='必填')
-        _, c1, c2, _ = st.columns([1, 2, 2, 1])
-        with c1:
-            st.markdown('<div style="text-align:right;padding-top:8px;color:rgba(255,255,255,0.6)">团队码：</div>', unsafe_allow_html=True)
-        with c2:
-            tc = st.text_input('团队码', key='login_tc', label_visibility='collapsed', placeholder='可空')
-        _, c1, c2, _ = st.columns([1, 2, 2, 1])
-        with c2:
-            share = st.checkbox('📤 共享我的数据给团队', key='login_share', value=False)
-        _, c1, c2, _ = st.columns([1, 2, 2, 1])
-        with c2:
-            if st.button('进入', type='primary', use_container_width=True):
-                if not un.strip():
-                    st.error('请输入用户名')
-                    st.stop()
-                st.session_state.user = un.strip()
+            st.text_input('账 号', key='login_un', placeholder='请输入账号')
+            pwd = st.text_input('密 码', type='password', key='login_pw', placeholder='6-8位 数字/字母')
+            tc = st.text_input('团队码', key='login_tc', placeholder='可空；填入后可以共享数据')
+            st.checkbox('📤 共享之前的数据给团队', key='login_share', value=bool(tc.strip()), disabled=not bool(tc.strip()))
+            if st.button('进 入', type='primary', use_container_width=True):
+                un = st.session_state.login_un.strip()
+                pw = st.session_state.login_pw
+                if not un:
+                    st.error('请输入账号'); st.stop()
+                if len(pw) < 6 or len(pw) > 8:
+                    st.error('密码需6-8位'); st.stop()
+                st.session_state.user = un
+                st.session_state.pwd_hash = pw
                 st.session_state.team = tc.strip()
-                st.session_state.share = share
+                st.session_state.share = st.session_state.login_share
+                # 团队码共享：把他人同团队码的数据合并过来
+                if st.session_state.share and st.session_state.team:
+                    _merge_team_data()
                 st.rerun()
         st.stop()
 
@@ -244,6 +242,25 @@ def db_load_sessions(user_only=False):
             r = q.eq("team_code", team).execute()
         return r.data
     except: return []
+
+def _merge_team_data():
+    """把团队码下的他人共享数据合并到当前用户"""
+    if not HAS_DB: return
+    try:
+        team = st.session_state.team
+        user = st.session_state.user
+        r = db.table("data_store").select("*").eq("team_code", team).execute()
+        for row in r.data:
+            if row.get('user_name') == user: continue
+            payload = row.get('payload', {})
+            db.table("data_store").upsert({
+                "id": f"{user}_{row['data_type']}_{row.get('user_name','')}",
+                "user_name": user,
+                "team_code": team,
+                "data_type": row['data_type'],
+                "payload": payload
+            }).execute()
+    except Exception: pass
 
 COLUMNS_ORDER = [
     '主播','轮次','环节','时间','时长','总时长','出单','退款',
@@ -796,6 +813,49 @@ def to_excel_bytes(rows):
     with pd.ExcelWriter(out, engine='openpyxl') as w: df.to_excel(w, sheet_name='直播数据', index=False)
     return out.getvalue()
 
+def _download_name(rows, is_finished=False):
+    """文件命名：8.6-7:00-第三轮售卖 或 8.6-7:00"""
+    dt = datetime.now()
+    base = f'{dt.month}.{dt.day}'
+    first_time = ''
+    for r in rows:
+        t = r.get('时间', '') or ''
+        if t and t not in ('/', ''):
+            first_time = str(t).replace('：', '-')
+            if first_time.startswith(base + '-'):
+                first_time = first_time[len(base)+1:]
+            break
+    if not first_time:
+        first_time = dt.strftime('%H-%M')
+    if is_finished:
+        return f'{base}-{first_time}'
+    last_label = ''
+    for r in reversed(rows):
+        rd = r.get('轮次', ''); ph = r.get('环节', '')
+        if rd and ph:
+            rd_str = str(rd).strip()
+            # 转中文数字
+            try:
+                n2c = {1:'一',2:'二',3:'四',4:'五',5:'六',6:'七',7:'八',8:'九',9:'九'}
+                n2c[3] = '三'
+                rd_str = n2c.get(int(rd), str(rd))
+            except: pass
+            last_label = f'{rd_str}轮{ph}'
+            break
+    if last_label:
+        return f'{base}-{first_time}-{last_label}'
+    return f'{base}-{first_time}'
+
+def chart_download_button(fig, fname):
+    """图表 PNG 下载"""
+    if not HAS_KALEIDO: return
+    try:
+        buf = BytesIO()
+        fig.write_image(buf, format='png', scale=2)
+        st.download_button('📥 PNG', data=buf.getvalue(), file_name=fname+'.png',
+                          mime='image/png', key='dlc_'+fname, use_container_width=True)
+    except Exception: pass
+
 def sync_editor_to_rows(edited_df, display_keys, current_rows):
     """用复合主键 (场次,轮次,环节) 定位行，无需 ID 列。"""
     edited_keys = set(zip(edited_df['场次'].astype(str), edited_df['轮次'].astype(str), edited_df['环节'].astype(str)))
@@ -935,8 +995,8 @@ with r1c4:
         st.session_state.current_host = name if name else st.session_state.current_host
         st.rerun()
 
-# Row 2: 时间
-r2c1, r2c2 = st.columns([1.5, 2.5])
+# Row 2: 时间 | 撤回键
+r2c1, r2c2 = st.columns([1.5, 1.0])
 today = datetime.now().date()
 with r2c1:
     st.markdown('<div style="color:rgba(255,255,255,0.6);font-size:0.68rem;margin:4px 0 2px">⏱ 时间</div>', unsafe_allow_html=True)
@@ -965,6 +1025,17 @@ with r2c1:
         with r2c: peh = st.number_input('结束·时', min_value=0, max_value=23, value=int(etv.hour) if etv else 0, step=1, key='pe_h', label_visibility='collapsed')
         with r2d: pem = st.number_input('结束·分', min_value=0, max_value=59, value=int(etv.minute) if etv else 0, step=1, key='pe_m', label_visibility='collapsed')
         st.session_state.phase_end_time = combine_dt(dtime(int(peh), int(pem)), today)
+
+with r2c2:
+    st.markdown('<div style="color:rgba(255,255,255,0.6);font-size:0.68rem;margin:4px 0 2px">&nbsp;</div>', unsafe_allow_html=True)
+    st.markdown('<a href="?undo=1" style="text-decoration:none"><button style="width:100%%;padding:0.45rem 0;border:1px solid #e0e0e0;border-radius:10px;background:#fff;color:#e53935;font-weight:700;cursor:pointer;transition:all 0.2s" onmouseover="this.style.background=\'#ffebee\'" onmouseout="this.style.background=\'#fff\'">↩ 撤回</button></a>', unsafe_allow_html=True)
+    if st.query_params.get("undo"):
+        ok, msg = do_undo()
+        st.query_params.clear()
+        if ok:
+            st.success(msg); st.rerun()
+        else:
+            st.info(msg)
 
 # Row 3: 数据确认 7字段一行
 st.markdown('<div style="color:rgba(255,255,255,0.6);font-size:0.68rem;margin:4px 0 2px">📝 数据确认</div>', unsafe_allow_html=True)
@@ -1006,17 +1077,55 @@ with b2:
 with b3:
     st.markdown('<div class="end-btn">', unsafe_allow_html=True)
     if st.button('🏁 结束本场', use_container_width=True, key='esb'):
-        ok, info = end_current_session()
-        if ok: st.success(f'✅ {info} 已存档'); st.rerun()
-        else: st.warning(f'⚠️ {info}')
+        st.session_state._confirm_end = True
     st.markdown('</div>', unsafe_allow_html=True)
+
+# 结束本场弹窗
+if st.session_state.get('_confirm_end'):
+    st.markdown(f'''<div style="
+        background:rgba(26,27,62,0.97); border:1px solid rgba(124,123,255,0.3); border-radius:16px;
+        padding:28px 24px; text-align:center; max-width:400px; margin:0 auto 20px">
+        <h3 style="margin:0 0 20px">📦 是否保存本场数据？</h3>
+        <p style="color:rgba(255,255,255,0.5);font-size:0.8rem">{st.session_state.current_session}</p>
+    </div>''', unsafe_allow_html=True)
+    c_yes, c_no = st.columns(2)
+    with c_yes:
+        if st.button('✅ 保 存', use_container_width=True, type='primary', key='end_save'):
+            ok, info = end_current_session()
+            if ok:
+                st.success(f'✅ {info} 已存档')
+                st.session_state._confirm_end = False
+                st.rerun()
+            else:
+                st.warning(f'⚠️ {info}')
+    with c_no:
+        if st.button('🗑 删 除', use_container_width=True, key='end_del'):
+            st.session_state.data_rows = []
+            st.session_state.last_cumulative = {}
+            st.session_state.prev_round_totals = {}
+            st.session_state._confirm_end = False
+            if HAS_DB:
+                try:
+                    db.table("data_store").delete().eq("id", f"{st.session_state.user}_autosave").execute()
+                except: pass
+            st.session_state.current_session = ''; st.session_state.current_round = 1
+            st.session_state.current_phase = '干货'; st.session_state.first_round = True
+            st.session_state.first_dry_start = datetime.now(); st.session_state.first_dry_duration = 40
+            st.session_state.round_label_override = {}
+            st.success('当前数据已删除')
+            st.rerun()
 
 if st.session_state.finished_sessions:
     with st.expander(f'📚 已结束 ({len(st.session_state.finished_sessions)} 场)', expanded=False):
         for i, fs in enumerate(st.session_state.finished_sessions):
-            c1, c2 = st.columns([8, 1])
+            c1, c2, c3 = st.columns([6, 1, 1])
             with c1: st.markdown(f'<span style="color:rgba(255,255,255,0.75);font-size:0.78rem">{fs["name"]} · {len(fs["rows"])} 行</span>', unsafe_allow_html=True)
             with c2:
+                bts2 = to_excel_bytes(fs['rows'])
+                uname = _download_name(fs['rows'], is_finished=True)
+                st.download_button('⬇', data=bts2, file_name=f'{uname}.xlsx', key=f'dl_fs_{i}',
+                    mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+            with c3:
                 if st.button('🗑', key=f'df_{i}', help='删除'): st.session_state.finished_sessions.pop(i); st.rerun()
 
 st.markdown('<div class="divider"></div>', unsafe_allow_html=True)
@@ -1050,7 +1159,8 @@ if '数据表格' in main_tab:
     with vcol2:
         if not df_all.empty or st.session_state.data_rows:
             bts = to_excel_bytes(st.session_state.data_rows)
-            st.download_button('⬇ 下载', data=bts, file_name=f'直播数据_{datetime.now().strftime("%Y%m%d_%H%M")}.xlsx',
+            dname = _download_name(st.session_state.data_rows, is_finished=False)
+            st.download_button('⬇ 下载', data=bts, file_name=f'{dname}.xlsx',
                 mime='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', key='dl_cur',
                 type='primary', use_container_width=True)
     with vcol3:
